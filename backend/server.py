@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -6,6 +7,7 @@ import os
 import logging
 import hashlib
 import json
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel
 from typing import List, Optional, Any
@@ -545,6 +547,162 @@ async def reseed():
     await db.esteiras.insert_many([dict(e) for e in ESTEIRAS])
     await db.projects.insert_many(seed_projects())
     return {"ok": True}
+
+
+def ghost_lines(p: dict, s: dict) -> List[dict]:
+    agent = s["agent"]
+    skills = s.get("skills") or []
+    title = s["title"].lower()
+    lines = [
+        {"t": "cmd", "v": f"$ ghostcli run --project {p['id']} --step {s['idx']:02d} --agent \"{agent}\""},
+        {"t": "info", "v": "→ conectando ao Sincron Brain MCP · carregando contexto do projeto"},
+        {"t": "info", "v": f"→ skills ativas: {', '.join(skills) if skills else 'core'}  · runner {p.get('runner','GhostCLI')}"},
+        {"t": "think", "v": f"[{agent}] planejando execução: {s['title']}"},
+    ]
+    if "scaffold" in title:
+        lines += [{"t": "cmd", "v": "$ flutter create . || pnpm create vite@latest"}, {"t": "ok", "v": "✓ manifesto (pubspec.yaml / package.json) e entrypoint físicos gerados"}]
+    elif "linter" in title or "compiler" in title:
+        lines += [{"t": "cmd", "v": "$ dart analyze && tsc --noEmit && ruff check ."}, {"t": "warn", "v": "⟳ loop de auto-correção: 3 avisos corrigidos automaticamente"}, {"t": "ok", "v": "✓ análise estática: 0 erros"}]
+    elif "qa" in title or "playwright" in title:
+        lines += [{"t": "cmd", "v": "$ playwright test --reporter=line  (emulador tavir_qa)"}, {"t": "ok", "v": "✓ evidências físicas salvas em qa/evidencias/"}]
+    elif "segur" in title or "lgpd" in title:
+        lines += [{"t": "think", "v": "auditando superfície OWASP + conformidade LGPD"}, {"t": "ok", "v": "✓ nenhuma vulnerabilidade crítica encontrada"}]
+    elif "gate" in title:
+        lines += [{"t": "warn", "v": "⚠ Gate Humano obrigatório · aguardando autorização do CEO"}]
+    elif "construç" in title or "construc" in title or "código" in title or "codigo" in title or "front" in title or "back" in title:
+        lines += [{"t": "think", "v": "gerando módulos de código · respeitando segregação arquitetural"}, {"t": "ok", "v": "✓ zero imports quebrados · zero stubs/TODO"}]
+    else:
+        lines += [{"t": "think", "v": "processando artefatos e validando saída verificável"}]
+    lines.append({"t": "ok", "v": f"✓ etapa {s['idx']:02d} processada · GhostCLI"})
+    return lines
+
+
+@api_router.get("/projects/{pid}/stream/{step_idx}")
+async def stream_step(pid: str, step_idx: int):
+    p = await db.projects.find_one({"id": pid})
+    if not p:
+        raise HTTPException(404, "Projeto não encontrado")
+    step = next((s for s in p["steps"] if s["idx"] == step_idx), None)
+    lines = ghost_lines(p, step) if step else [{"t": "warn", "v": "etapa não encontrada"}]
+
+    async def gen():
+        for ln in lines:
+            yield f"data: {json.dumps(ln, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(0.32)
+        yield "event: end\ndata: {}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
+
+
+def build_documents(p: dict) -> List[dict]:
+    brief = p.get("briefing") or {}
+    steps = p["steps"]
+    done = done_count(steps)
+    total = len(steps)
+    openp = len([x for x in p["pendencies"] if not x["resolved"]])
+    gate0 = next((s for s in steps if s["idx"] == 1), None)
+    gate0_hash = (gate0 or {}).get("hash", "sha256:—")
+    seal = "> ✅ **Banca Revisora Independente** — documento revisado e aprovado."
+
+    def dim(k, fallback):
+        return brief.get(k) or fallback
+
+    project_md = f"""# {p['name']}
+
+**Cliente:** {p['client']}
+**Código da esteira:** `{p['code']}`
+**Stack:** {p.get('stack', '—')}
+**Banco de dados:** {p.get('db', '—')}
+**Runner:** `{p.get('runner', 'GhostCLI')}`
+
+## Visão geral
+Projeto conduzido pela **TAVIR Fábrica de Software Autônoma**, com gates humanos obrigatórios, mesas especializadas e Completion Guard físico. Cada etapa é executada por um agente dedicado via GhostCLI e validada por evidências reais.
+
+## Status operacional
+- Etapa atual: **{done} de {total}**
+- Pendências abertas: **{openp}**
+- Progresso: **{progress_of(steps)}%**
+
+{seal}
+"""
+
+    briefing_md = f"""# 01 · Briefing Gate 0
+
+Assinatura do Gate 0: `{gate0_hash}`
+
+## 1. Ideia & Problema de Negócio
+{dim('Ideia & Problema', 'Demanda aprovada pelo CEO para ' + p['name'] + '.')}
+
+## 2. Público-Alvo & Perfil de Utilizador
+{dim('Público-Alvo', 'Público definido na descoberta com ' + p['client'] + '.')}
+
+## 3. Stack Tecnológica
+{dim('Stack Tecnológica', p.get('stack', '—'))}
+
+## 4. Banco de Dados
+{dim('Banco de Dados', p.get('db', '—'))}
+
+## 5. Materiais & Referências Visuais
+{dim('Materiais & Referências', 'Tokens de marca e referências aprovadas na prova visual.')}
+
+## 6. Integrações & MCPs
+{dim('Integrações & MCPs', 'GhostCLI · Playwright · Android SDK / tavir_qa · Sincron Brain MCP')}
+
+## 7. Regras de Negócio & Escopo Negativo
+{dim('Regras de Negócio', 'Escopo e restrições registrados no intake estruturado.')}
+
+{seal}
+"""
+
+    req_md = f"""# 02 · Requisitos Verificáveis
+
+Requisitos derivados do Gate 0 e aprovados pela banca independente. Cada requisito é **verificável** por evidência física.
+
+## Requisitos funcionais
+- Entregar {p['name']} conforme a esteira `{p['code']}` ({total} etapas).
+- Respeitar todos os Gates Humanos obrigatórios antes de avançar de fase.
+- Produzir artefatos físicos em disco (código, testes, evidências de QA).
+
+## Critérios de aceite (Completion Guard)
+- Volume de conteúdo e manifesto válidos.
+- Entrypoint executável e segregação arquitetural respeitada.
+- Zero imports quebrados, zero `// TODO`/stubs.
+- QA + Segurança + Documentação em estado PASS.
+
+{seal}
+"""
+
+    arch_md = f"""# 03 · Arquitetura
+
+## Decisões de arquitetura
+- **Stack:** {p.get('stack', '—')}
+- **Persistência:** {p.get('db', '—')}
+- **Execução:** agentes autônomos orquestrados por `{p.get('runner', 'GhostCLI')}`.
+
+## Mesas & agentes
+""" + "\n".join([f"- Etapa {s['idx']:02d} · **{s['title']}** — {s['agent']}" + (f" (`{', '.join(s.get('skills', []))}`)" if s.get("skills") else "") for s in steps]) + f"""
+
+## Loop de qualidade
+Análise estática contínua (`dart analyze` / `tsc --noEmit` / `ruff`) + Playwright/Emulador `tavir_qa`, finalizando no **Gate Final CEO · Completion Guard**.
+
+{seal}
+"""
+
+    return [
+        {"name": "PROJECT.md", "content": project_md, "reviewed": True},
+        {"name": "01-briefing-gate0.md", "content": briefing_md, "reviewed": True},
+        {"name": "02-requisitos.md", "content": req_md, "reviewed": True},
+        {"name": "03-arquitetura.md", "content": arch_md, "reviewed": True},
+    ]
+
+
+@api_router.get("/projects/{pid}/documents")
+async def get_documents(pid: str):
+    p = await db.projects.find_one({"id": pid})
+    if not p:
+        raise HTTPException(404, "Projeto não encontrado")
+    return build_documents(strip_id(p))
 
 
 app.include_router(api_router)

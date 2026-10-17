@@ -12,5 +12,6 @@ export const completeStep = (id) => http.post(`/projects/${id}/complete-step`).t
 export const resolvePendency = (id, pendId, body = {}) =>
   http.post(`/projects/${id}/pendencies/${pendId}/resolve`, body).then((r) => r.data);
 export const createProject = (brief) => http.post("/projects", brief).then((r) => r.data);
+export const getDocuments = (id) => http.get(`/projects/${id}/documents`).then((r) => r.data);
 
 export default http;
