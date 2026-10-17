@@ -182,3 +182,57 @@ def test_create_project_too_short():
     }
     r = requests.post(f"{API}/projects", json=payload, timeout=15)
     assert r.status_code == 422
+
+
+# ---------------- SSE stream ----------------
+def test_stream_step_sse():
+    r = requests.get(f"{API}/projects/proj-meridian/stream/8", timeout=30, stream=True)
+    assert r.status_code == 200
+    ct = r.headers.get("content-type", "")
+    assert "text/event-stream" in ct
+    body_lines = []
+    end_seen = False
+    for raw in r.iter_lines(decode_unicode=True):
+        if raw is None:
+            continue
+        body_lines.append(raw)
+        if raw.startswith("event: end"):
+            end_seen = True
+            break
+        if len(body_lines) > 100:
+            break
+    joined = "\n".join(body_lines)
+    assert "ghostcli run" in joined
+    assert "Sincron Brain MCP" in joined
+    assert end_seen
+
+
+def test_stream_step_not_found():
+    r = requests.get(f"{API}/projects/does-not-exist/stream/1", timeout=10, stream=True)
+    assert r.status_code == 404
+
+
+# ---------------- Documents ----------------
+def test_get_documents_meridian():
+    r = requests.get(f"{API}/projects/proj-meridian/documents", timeout=15)
+    assert r.status_code == 200
+    docs = r.json()
+    names = [d["name"] for d in docs]
+    for expected in ["PROJECT.md", "01-briefing-gate0.md", "02-requisitos.md", "03-arquitetura.md"]:
+        assert expected in names
+    assert len(docs) == 4
+    for d in docs:
+        assert "content" in d
+        assert d["reviewed"] is True
+        assert "Banca Revisora Independente" in d["content"]
+    project_md = next(d for d in docs if d["name"] == "PROJECT.md")
+    assert "Landing Meridian Capital" in project_md["content"]
+    arch = next(d for d in docs if d["name"] == "03-arquitetura.md")
+    # Should list all 16 steps
+    assert arch["content"].count("Etapa ") >= 16
+
+
+def test_get_documents_not_found():
+    r = requests.get(f"{API}/projects/does-not-exist/documents", timeout=10)
+    assert r.status_code == 404
+

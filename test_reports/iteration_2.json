@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 2 (new features) — Backend: 15/15 pytest green (prev 11 + 4 new for SSE stream & documents). Frontend: GhostLogs SSE EventSource verified live on proj-atlas (6 streamed lines including 'ghostcli run --project proj-atlas --step 04' and 'Sincron Brain MCP'); step advanced after stream. Kanban columns render correctly (atlas: 8 aguardando / 2 bloqueado / 1 active / 3 done = 14 total; active card has draggable=true). Roadmap renders 16 rows for proj-meridian with amber diamond markers on Gate steps. Documents tab lists 4 files (PROJECT.md, 01-briefing-gate0.md, 02-requisitos.md, 03-arquitetura.md), each with 'Banca Revisora Independente' seal; switching docs changes rendered markdown. All 7 tabs switch correctly; regression on Pendencies/Gate0 unaffected. Note: HTML5 drag-and-drop could not be reliably simulated via synthetic DragEvent+DataTransfer in headless harness (card returned to active column); the columns and draggable attribute are correct, and backend complete-step path is already covered by pytest.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/projects/proj-crm (guard)", "issue": "Still from iter 1 — guard.passed=5/8 for the 6-step completed SY-M project (rules 5-7 hard-coded to done>=8/10/12). Not re-tested in this iteration; main agent action item carries over."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "(Carry-over) Fix completion_guard() rule thresholds so proj-crm concluido returns 8/8 (scale by ratio or short-circuit when status=='concluido').",
+    "Optional: use Playwright's native page.drag_and_drop or mouse.down/move/up to make kanban HTML5 drag-drop e2e-testable (current native drag works in real browser but not through dispatchEvent)."
+  ],
+  "critical_code_review_comments": [
+    "GhostLogs panel is position:fixed bottom-right with w-[min(540px,calc(100vw-360px))]; on narrow viewports it overlaps the Pendencies card bottom-right area (seen in Overview screenshot). Consider offsetting content with bottom padding or z-index guard.",
+    "ProjectView.streamStep() uses EventSource with no abort on component unmount — if user navigates away mid-stream the ES stays open until 'end'. Minor leak; wrap in a ref and close in useEffect cleanup.",
+    "KanbanBoard.drop() only reads dragId state; works for same-session drag but ignores dataTransfer, so cross-window DnD and some test harnesses cannot drive it. Consider setting dataTransfer.setData in onDragStart.",
+    "GET /api/projects/{pid}/stream/{step_idx} does not validate step_idx numeric range (returns 'etapa não encontrada' line but still 200/stream). Low risk.",
+    "RoadmapGantt phase coloring uses `Math.floor(i / Math.ceil(total/4))` which can give index 4 (out of 0..3) for last row when total is not divisible by 4; works due to %4 but logic is subtle.",
+    "md.jsx renderer trust level unknown — ensure documents (user-controlled brief fields will flow into briefing_md) are sanitized before rendering as HTML to avoid XSS from Gate 0 form."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (15/15 pytest)", "frontend": "100% of critical new-feature flows verified; kanban drag completion via synthetic events not simulable (columns/draggable correct)"},
+  "test_credentials": "N/A — no auth",
+  "seed_data_creation": "POST /api/admin/reseed before each counting UI check.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 4 new features (SSE live logs, autonomous exec button present, kanban columns/drag-attr, roadmap gantt, documents markdown) verified. Only outstanding issue is iter-1 completion_guard thresholds for short esteiras. If re-testing kanban drag completion end-to-end, prefer page.mouse.down/move/up or Playwright's locator.drag_to() over synthetic DragEvent."
+}

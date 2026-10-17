@@ -39,6 +39,7 @@ export default function ProjectView() {
   const [logsOpen, setLogsOpen] = useState(true);
   const [streaming, setStreaming] = useState(false);
   const autoRef = useRef(false);
+  const esRef = useRef(null);
 
   const load = useCallback(async () => {
     const p = await getProject(id);
@@ -48,7 +49,7 @@ export default function ProjectView() {
   }, [id]); // eslint-disable-line
 
   useEffect(() => { load().catch(() => toast.error("Projeto não encontrado")); }, [load]);
-  useEffect(() => () => { autoRef.current = false; }, []);
+  useEffect(() => () => { autoRef.current = false; esRef.current?.close(); }, []);
 
   const currentActionable = (p) => p.steps.find((s) => s.status !== "done");
 
@@ -56,10 +57,11 @@ export default function ProjectView() {
     setLogsOpen(true);
     setStreaming(true);
     const es = new EventSource(`${API}/projects/${id}/stream/${idx}`);
+    esRef.current = es;
     es.onmessage = (e) => {
       try { const d = JSON.parse(e.data); if (d && d.v) setLogs((l) => [...l, d]); } catch {}
     };
-    const finish = () => { es.close(); setStreaming(false); resolve(); };
+    const finish = () => { es.close(); esRef.current = null; setStreaming(false); resolve(); };
     es.addEventListener("end", finish);
     es.onerror = finish;
   });
