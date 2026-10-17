@@ -14,4 +14,11 @@ export const resolvePendency = (id, pendId, body = {}) =>
 export const createProject = (brief) => http.post("/projects", brief).then((r) => r.data);
 export const getDocuments = (id) => http.get(`/projects/${id}/documents`).then((r) => r.data);
 
+export const uploadFile = (file, kind = "context") => {
+  const fd = new FormData();
+  fd.append("file", file);
+  return http.post(`/upload?kind=${kind}`, fd, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data);
+};
+export const createProjectIntake = (body) => http.post("/projects/intake", body).then((r) => r.data);
+
 export default http;

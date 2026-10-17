@@ -4,7 +4,7 @@ import IconRail from "./IconRail";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
 import CommandPalette from "@/components/CommandPalette";
-import Gate0Modal from "@/components/Gate0Modal";
+import NewProjectModal from "@/components/NewProjectModal";
 
 const ShellContext = createContext(null);
 export const useShell = () => useContext(ShellContext);
@@ -12,7 +12,7 @@ export const useShell = () => useContext(ShellContext);
 export default function AppShell() {
   const [projectName, setProjectName] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [gate0Open, setGate0Open] = useState(false);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -27,7 +27,7 @@ export default function AppShell() {
 
   const ctx = {
     setProjectName: useCallback((n) => setProjectName(n), []),
-    openGate0: () => setGate0Open(true),
+    openNewProject: () => setNewProjectOpen(true),
   };
 
   return (
@@ -39,7 +39,7 @@ export default function AppShell() {
           <TopBar
             projectName={projectName}
             onOpenPalette={() => setPaletteOpen(true)}
-            onOpenGate0={() => setGate0Open(true)}
+            onNewProject={() => setNewProjectOpen(true)}
           />
           <main className="flex-1 overflow-y-auto relative z-[2]">
             <Outlet />
@@ -47,8 +47,8 @@ export default function AppShell() {
         </div>
       </div>
 
-      <CommandPalette open={paletteOpen} setOpen={setPaletteOpen} onInitiateJob={() => setGate0Open(true)} />
-      <Gate0Modal open={gate0Open} setOpen={setGate0Open} />
+      <CommandPalette open={paletteOpen} setOpen={setPaletteOpen} onNewProject={() => setNewProjectOpen(true)} />
+      <NewProjectModal open={newProjectOpen} setOpen={setNewProjectOpen} />
     </ShellContext.Provider>
   );
 }

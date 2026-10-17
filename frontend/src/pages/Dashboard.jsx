@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useShell } from "@/components/shell/AppShell";
 import { getEsteiras, getProjects } from "@/lib/api";
 import { TYPE_LABEL, BADGE, CODE_BADGE, STATUS } from "@/lib/tavir";
-import { Layers, ShieldCheck, AlertCircle } from "lucide-react";
+import { Layers, ShieldCheck, AlertCircle, Plus } from "lucide-react";
 
 function EsteiraCard({ e, onClick, delay }) {
   return (
@@ -102,12 +102,24 @@ export default function Dashboard() {
   ];
 
   return (
-    <div className="px-6 lg:px-8 py-7 max-w-[1500px]">
-      <p className="text-[11px] font-semibold tracking-[0.2em] text-[#5C6578] mono">MÓDULOS · TAVIR FÁBRICA</p>
-      <h2 className="text-3xl font-extrabold tracking-tight mt-1 text-[#E8EDF5]">Esteiras de desenvolvimento</h2>
-      <p className="text-[#8A94A6] mt-1.5">Esteiras com gates humanos obrigatórios, mesas especializadas e controle de entrega.</p>
+    <div className="px-6 lg:px-10 py-8 max-w-[1500px]">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p className="text-[11px] font-semibold tracking-[0.2em] text-[#5C6578] mono">MÓDULOS · TAVIR FÁBRICA</p>
+          <h2 className="text-3xl font-extrabold tracking-tight mt-1 text-[#E8EDF5]">Esteiras de desenvolvimento</h2>
+          <p className="text-[#8A94A6] mt-1.5">Esteiras com gates humanos obrigatórios, mesas especializadas e controle de entrega.</p>
+        </div>
+        <button
+          onClick={() => shell?.openNewProject()}
+          data-testid="new-project-button"
+          className="btn-lime h-11 px-5 rounded-xl flex items-center gap-2 text-[15px] shrink-0"
+        >
+          <Plus size={18} strokeWidth={2.5} />
+          Novo Projeto
+        </button>
+      </div>
 
-      <div className="flex items-center gap-2 mt-5">
+      <div className="flex items-center gap-2 mt-7">
         {FILTERS.map((f) => (
           <button
             key={f.id}
@@ -121,16 +133,16 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 mt-6">
         {shown.map((e, i) => (
           <EsteiraCard key={e.id} e={e} delay={i * 45} onClick={() => setFilter(e.type)} />
         ))}
       </div>
 
-      <h2 className="text-xl font-bold tracking-tight mt-10 flex items-center gap-2 text-[#E8EDF5]">
+      <h2 className="text-xl font-bold tracking-tight mt-12 flex items-center gap-2 text-[#E8EDF5]">
         <Layers size={18} className="text-teal-400" /> Projetos em andamento na Fábrica
       </h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-4 pb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 mt-5 pb-10">
         {projects.map((p, i) => (
           <ProjectCard key={p.id} p={p} delay={i * 45} onClick={() => navigate(`/projeto/${p.id}`)} />
         ))}

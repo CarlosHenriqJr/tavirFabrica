@@ -1,5 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -8,11 +8,57 @@ import logging
 import hashlib
 import json
 import asyncio
+import requests
 from pathlib import Path
 from pydantic import BaseModel
 from typing import List, Optional, Any
 import uuid
 from datetime import datetime, timezone
+
+# ----------------------------- Object storage -----------------------------
+STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
+STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
+EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+APP_NAME = "tavir-fabrica"
+_storage_key = None
+
+
+def init_storage(force: bool = False):
+    global _storage_key
+    if _storage_key and not force:
+        return _storage_key
+    key_env = os.environ.get("EMERGENT_LLM_KEY")
+    resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": key_env}, timeout=30)
+    resp.raise_for_status()
+    _storage_key = resp.json()["storage_key"]
+    return _storage_key
+
+
+def put_object(path: str, data: bytes, content_type: str) -> dict:
+    key = init_storage()
+    resp = requests.put(f"{STORAGE_URL}/objects/{path}",
+                        headers={"X-Storage-Key": key, "Content-Type": content_type},
+                        data=data, timeout=120)
+    if resp.status_code == 404:
+        key = init_storage(force=True)
+        resp = requests.put(f"{STORAGE_URL}/objects/{path}",
+                            headers={"X-Storage-Key": key, "Content-Type": content_type},
+                            data=data, timeout=120)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_object(path: str):
+    key = init_storage()
+    resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
+    resp.raise_for_status()
+    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+
+MIME_TYPES = {
+    "md": "text/markdown", "txt": "text/plain", "html": "text/html",
+    "zip": "application/zip", "json": "application/json",
+}
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -78,6 +124,28 @@ class Briefing(BaseModel):
 class ResolvePayload(BaseModel):
     supabase_url: Optional[str] = None
     note: Optional[str] = None
+
+
+class FileRef(BaseModel):
+    id: str
+    name: str
+    url: str
+    size: int = 0
+    type: str = ""
+
+
+class NewProjectIn(BaseModel):
+    nome: str
+    empresa: str
+    front: Optional[str] = ""
+    back: Optional[str] = ""
+    db: Optional[str] = ""
+    tipo: str = "sistema"           # lp | sistema | oferta
+    escopo: str                     # ideacao | pronto
+    contextFiles: List[FileRef] = []
+    designSystem: Optional[FileRef] = None
+    segmento: Optional[str] = ""
+    concorrentes: Optional[str] = ""
 
 
 # ----------------------------- Seed data -----------------------------
@@ -350,6 +418,11 @@ def completion_guard(project: dict) -> dict:
 
 @app.on_event("startup")
 async def seed():
+    try:
+        init_storage()
+        logger.info("Object storage initialized")
+    except Exception as e:
+        logger.error(f"Storage init failed: {e}")
     if await db.esteiras.count_documents({}) == 0:
         await db.esteiras.insert_many([dict(e) for e in ESTEIRAS])
         logger.info("Seeded esteiras")
@@ -703,6 +776,135 @@ async def get_documents(pid: str):
     if not p:
         raise HTTPException(404, "Projeto não encontrado")
     return build_documents(strip_id(p))
+
+
+TIPO_MAP = {
+    "lp": ("LP-C", "lp-c"),
+    "sistema": ("SY-C", "sy-c"),
+    "oferta": ("OF-C", "of-c"),
+}
+
+
+def intake_steps(esteira_id: str, escopo: str, hashval: str) -> List[dict]:
+    builder = ESTEIRA_STEP_BUILDERS.get(esteira_id, sy_c_steps)
+    steps = builder()
+    for s in steps:
+        s["status"] = "blocked"
+        s["blockReason"] = None
+        s.pop("hash", None)
+    if escopo == "ideacao":
+        ideation = [
+            {"idx": 0, "title": "Ideação & Problema de Negócio", "agent": "Dora Descoberta", "skills": ["brand-context"], "status": "active", "isGate": False, "blockReason": None},
+            {"idx": 0, "title": "Pesquisa de Mercado & Concorrência", "agent": "Dora Descoberta", "skills": ["market-research"], "status": "blocked", "isGate": False, "blockReason": None},
+            {"idx": 0, "title": "Validação da Oportunidade (Gate)", "agent": "Dora Descoberta", "skills": [], "status": "blocked", "isGate": True, "blockReason": None},
+        ]
+        combined = ideation + steps
+        for i, s in enumerate(combined, 1):
+            s["idx"] = i
+        combined[0]["hash"] = hashval
+        return combined
+    # escopo "pronto": Gate 0 já aprovado a partir do briefing/anexos
+    steps[0]["status"] = "done"
+    steps[0]["hash"] = hashval
+    if len(steps) > 1:
+        steps[1]["status"] = "active"
+    return steps
+
+
+@api_router.post("/upload")
+async def upload(file: UploadFile = File(...), kind: str = "context"):
+    ext = (file.filename.rsplit(".", 1)[-1] if "." in file.filename else "bin").lower()
+    allowed_context = {"md", "txt", "html"}
+    allowed_ds = {"zip"}
+    allowed = allowed_ds if kind == "design" else allowed_context
+    if ext not in allowed:
+        raise HTTPException(422, f"Extensão .{ext} não permitida para '{kind}'. Aceitos: {', '.join(sorted(allowed))}")
+    data = await file.read()
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(413, "Arquivo excede 25MB")
+    fid = str(uuid.uuid4())
+    path = f"{APP_NAME}/uploads/{fid}.{ext}"
+    content_type = file.content_type or MIME_TYPES.get(ext, "application/octet-stream")
+    try:
+        result = put_object(path, data, content_type)
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(502, "Falha ao enviar o arquivo para o storage")
+    storage_path = result["path"]
+    await db.files.insert_one({
+        "id": fid, "storage_path": storage_path, "original_filename": file.filename,
+        "content_type": content_type, "size": result.get("size", len(data)), "kind": kind,
+        "is_deleted": False, "created_at": now_iso(),
+    })
+    return {"id": fid, "name": file.filename, "url": f"/api/files/{storage_path}",
+            "size": result.get("size", len(data)), "type": content_type, "kind": kind}
+
+
+@api_router.get("/files/{path:path}")
+async def download_file(path: str):
+    record = await db.files.find_one({"storage_path": path, "is_deleted": False})
+    if not record:
+        raise HTTPException(404, "Arquivo não encontrado")
+    try:
+        data, content_type = get_object(path)
+    except Exception:
+        raise HTTPException(404, "Arquivo não encontrado no storage")
+    headers = {"Content-Disposition": f'inline; filename="{record.get("original_filename", "file")}"'}
+    return Response(content=data, media_type=record.get("content_type", content_type), headers=headers)
+
+
+@api_router.post("/projects/intake")
+async def create_project_intake(body: NewProjectIn):
+    if not body.nome.strip() or not body.empresa.strip():
+        raise HTTPException(422, "Nome do projeto e Empresa são obrigatórios.")
+    if body.escopo not in ("ideacao", "pronto"):
+        raise HTTPException(422, "Escopo inválido (use 'ideacao' ou 'pronto').")
+    code, esteira_id = TIPO_MAP.get(body.tipo, TIPO_MAP["sistema"])
+
+    hashval = sha256_of({"nome": body.nome, "empresa": body.empresa, "escopo": body.escopo, "ts": now_iso()})
+    steps = intake_steps(esteira_id, body.escopo, hashval)
+
+    stack_parts = [p for p in [body.front, body.back, body.db] if (p or "").strip()]
+    stack_str = " / ".join(stack_parts) if stack_parts else "—"
+    stack_l = (body.front + " " + body.back).lower()
+    scaffold = "flutter create" if "flutter" in stack_l else ("pnpm create vite" if ("react" in stack_l or "vite" in stack_l or "next" in stack_l) else ("python -m venv" if "python" in stack_l or "fastapi" in stack_l else "scaffold físico oficial"))
+
+    if body.escopo == "ideacao":
+        first_msg = "Projeto iniciado do zero · Dora conduzindo ideação e pesquisa de mercado"
+        first_agent = "Dora Descoberta"
+    else:
+        first_msg = f"Escopo recebido · Gate 0 aprovado · {scaffold} · pronto para desenvolvimento"
+        first_agent = "Dora Descoberta"
+
+    pid = "proj-" + uuid.uuid4().hex[:8]
+    doc = {
+        "id": pid, "name": body.nome.strip(), "code": code, "esteira": esteira_id,
+        "client": body.empresa.strip(), "status": "andamento", "stack": stack_str,
+        "stackParts": {"front": body.front, "back": body.back, "db": body.db},
+        "db": body.db or "—", "scope": body.escopo, "tipo": body.tipo,
+        "runner": "GhostCLI · claude-sonnet-5", "steps": steps, "pendencies": [],
+        "activity": [{"date": datetime.now(timezone.utc).strftime("%d/%m %H:%M"), "agent": first_agent, "message": first_msg}],
+        "inventory": None, "env": [],
+        "files": [{"path": f["name"], "type": "artifact", "url": f["url"]} for f in body.contextFiles]
+                 + ([{"path": body.designSystem.name, "type": "design-system", "url": body.designSystem.url}] if body.designSystem else []),
+        "contextFiles": [f.dict() for f in body.contextFiles],
+        "designSystem": body.designSystem.dict() if body.designSystem else None,
+        "briefing": {
+            "Ideia & Problema": body.segmento or body.nome,
+            "Público-Alvo": body.empresa,
+            "Stack Tecnológica": stack_str,
+            "Banco de Dados": body.db or "—",
+            "Materiais & Referências": (body.designSystem.name if body.designSystem else "—"),
+            "Integrações & MCPs": "GhostCLI · Playwright · Sincron Brain MCP",
+            "Regras de Negócio": body.concorrentes or "—",
+        },
+    }
+    await db.projects.insert_one(dict(doc))
+    await db.esteiras.update_one({"id": esteira_id}, {"$inc": {"projects": 1}})
+    out = enrich(doc)
+    out["hash"] = hashval
+    out["scaffold"] = scaffold
+    return out
 
 
 app.include_router(api_router)

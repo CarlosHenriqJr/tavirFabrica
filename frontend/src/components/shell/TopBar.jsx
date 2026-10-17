@@ -1,8 +1,8 @@
 import React from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Search, Play, ChevronRight } from "lucide-react";
+import { Search, Plus, ChevronRight } from "lucide-react";
 
-export default function TopBar({ projectName, onOpenPalette, onOpenGate0 }) {
+export default function TopBar({ projectName, onOpenPalette, onNewProject }) {
   const navigate = useNavigate();
   const { id } = useParams();
 
@@ -38,12 +38,12 @@ export default function TopBar({ projectName, onOpenPalette, onOpenGate0 }) {
         </button>
 
         <button
-          onClick={onOpenGate0}
-          data-testid="iniciar-job-button"
+          onClick={onNewProject}
+          data-testid="new-project-button-top"
           className="btn-lime h-9 px-4 rounded-lg flex items-center gap-2 text-sm"
         >
-          <Play size={15} fill="#090D16" strokeWidth={0} />
-          Iniciar job
+          <Plus size={16} strokeWidth={2.5} />
+          Novo Projeto
         </button>
       </div>
     </header>

@@ -2,10 +2,10 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator,
 } from "@/components/ui/command";
-import { Play, Box, Brain, Layers, Activity } from "lucide-react";
+import { Plus, Box, Brain, Layers, Activity } from "lucide-react";
 import { getProjects } from "@/lib/api";
 
-export default function CommandPalette({ open, setOpen, onInitiateJob }) {
+export default function CommandPalette({ open, setOpen, onNewProject }) {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
 
@@ -21,9 +21,9 @@ export default function CommandPalette({ open, setOpen, onInitiateJob }) {
       <CommandList>
         <CommandEmpty>Nenhum resultado encontrado.</CommandEmpty>
         <CommandGroup heading="Ações">
-          <CommandItem onSelect={() => go(onInitiateJob)} data-testid="palette-iniciar-job">
-            <Play className="mr-2 h-4 w-4 text-lime-400" />
-            Iniciar job · Gate 0 Intake
+          <CommandItem onSelect={() => go(onNewProject)} data-testid="palette-new-project">
+            <Plus className="mr-2 h-4 w-4 text-lime-400" />
+            Novo Projeto
           </CommandItem>
           <CommandItem onSelect={() => go(() => navigate("/"))}>
             <Layers className="mr-2 h-4 w-4 text-teal-400" />
