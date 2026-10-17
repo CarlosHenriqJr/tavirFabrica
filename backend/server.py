@@ -885,7 +885,7 @@ async def create_project_intake(body: NewProjectIn):
         "runner": "GhostCLI · claude-sonnet-5", "steps": steps, "pendencies": [],
         "activity": [{"date": datetime.now(timezone.utc).strftime("%d/%m %H:%M"), "agent": first_agent, "message": first_msg}],
         "inventory": None, "env": [],
-        "files": [{"path": f["name"], "type": "artifact", "url": f["url"]} for f in body.contextFiles]
+        "files": [{"path": f.name, "type": "artifact", "url": f.url} for f in body.contextFiles]
                  + ([{"path": body.designSystem.name, "type": "design-system", "url": body.designSystem.url}] if body.designSystem else []),
         "contextFiles": [f.dict() for f in body.contextFiles],
         "designSystem": body.designSystem.dict() if body.designSystem else None,

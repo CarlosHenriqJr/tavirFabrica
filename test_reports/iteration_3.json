@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 3 — New Project flow (dashboard refactor + intake). All 7 feature items verified end-to-end via Playwright. Dashboard: both new-project-button (header) and new-project-button-top (TopBar) present; 'Iniciar job' is GONE. Modal: all required data-testids present (np-nome, np-empresa, np-tipo-lp/sistema/oferta, np-front, np-back, np-db, np-context-btn/input, np-design-btn/input, np-escopo-ideacao/pronto, np-segmento, np-concorrentes, np-submit). Stack renders THREE separate inputs — Banco de Dados is its own field (np-db), not nested under Back-end. Submit disabled validation: disabled with empty / only nome; enabled with nome+empresa. Context upload: multi-select .md+.txt uploaded to object storage (returns /api/files/tavir-fabrica/uploads/{uuid}.{ext}); .zip rejected with 422 + Portuguese toast ('Extensão .zip não permitida para context'); files not added to list. Design upload: .zip accepted and rendered with np-design-file chip. Escopo toggle fully mutually exclusive: ideacao reveals np-segmento+np-concorrentes; pronto hides them. Submission: ideacao (tipo=sistema) → 17 steps, step 1 'Ideação & Problema de Negócio' status=active, agent='Dora Descoberta'; pronto (tipo=sistema) → 14 steps, step 1 'Gate 0 · Demanda e briefing' status=done, step 2 'Requisitos verificáveis' status=active, stack='React + Vite / FastAPI / MongoDB'. Both navigate to /projeto/{pid}. Dashboard count incremented 6→7 and esteira 'Sistemas · Criação' project count went 1→3 (both new projects visible on dashboard). ONE CRITICAL BACKEND BUG found and fixed inline.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/projects/intake", "issue": "FIXED by testing agent — server.py L888 used dict subscripting (f[\"name\"], f[\"url\"]) on Pydantic FileRef objects, causing TypeError: 'FileRef' object is not subscriptable → 500 whenever contextFiles were sent. Main agent's prior curl verification missed this because it didn't include contextFiles in payload. Replaced with f.name / f.url attribute access.", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "/api/projects/proj-crm (guard)", "issue": "Carryover from iter 1 — completion_guard() rule thresholds hard-coded to done>=8/10/12 return 5/8 for 6-step esteira. Not retested."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Verify the one-line fix I applied at /app/backend/server.py:888 (FileRef attribute access vs dict subscript). Consider adding a pytest case that posts /api/projects/intake WITH contextFiles+designSystem (previous suites only exercised empty-attachment path).",
+    "(Carryover) Fix completion_guard() thresholds for short esteiras."
+  ],
+  "critical_code_review_comments": [
+    "server.py intake endpoint: inconsistent handling of body.contextFiles — line 888 used dict syntax while line 890 correctly uses .dict(). Fixed. Add a pydantic-aware helper or iterate once to avoid future drift.",
+    "NewProjectModal.jsx: no client-side extension pre-validation before upload — a bad file still round-trips to server (acceptable, but produces console 500 noise). Could leverage the input accept='.md,.txt,.html' pattern more strictly or validate file.name extension before calling uploadFile.",
+    "NewProjectModal effect resets state only on open=true transitions; closing+reopening between submits is OK, but if submit fails after setSubmitting(true) and user retries, uploading state could be stale. Minor.",
+    "init_storage reads EMERGENT_LLM_KEY at call time (per request) which is fine, but no caching → each upload re-initializes the client. Consider memoizing after first successful init.",
+    "GET /api/files/{path:path} path uses raw user-controlled uuid filenames (safe) but has no auth; file names are predictable UUIDs so low risk; consider signed URLs if later multi-tenant."
+  ],
+  "updated_files": ["/app/backend/server.py"],
+  "success_rate": {"backend": "100% after 1-line fix (intake 500 → 200)", "frontend": "100% of new-project flow (all 7 feature items)"},
+  "test_credentials": "N/A — no auth",
+  "seed_data_creation": "Called POST /api/admin/reseed before and after test runs to keep dashboard counts deterministic.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "New Project (intake) flow is now fully green. The only outstanding server-side bug fixed by this agent was server.py:888 FileRef subscript. If backend_test.py is expanded, add a case: POST /api/upload?kind=context with .md → use returned FileRef in POST /api/projects/intake payload and assert project.files[0].url == uploaded url. Carryover from iter 1 (completion_guard thresholds) still open.",
+  "rca of the issue": "FileRef (pydantic BaseModel) was accessed as dict (f['name']) in the files list-comp inside create_project_intake. This path only executes when request body.contextFiles is non-empty, so the main agent's curl-only verification (sent without contextFiles) could not trigger it. Repro: POST /api/projects/intake with contextFiles=[{name,url,id,size,type}] → 500 TypeError. Mitigation: switch to attribute access (f.name, f.url) matching the pattern used two lines below for body.designSystem."
+}
