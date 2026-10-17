@@ -1,0 +1,556 @@
+from fastapi import FastAPI, APIRouter, HTTPException
+from dotenv import load_dotenv
+from starlette.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+import os
+import logging
+import hashlib
+import json
+from pathlib import Path
+from pydantic import BaseModel
+from typing import List, Optional, Any
+import uuid
+from datetime import datetime, timezone
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
+mongo_url = os.environ['MONGO_URL']
+client = AsyncIOMotorClient(mongo_url)
+db = client[os.environ['DB_NAME']]
+
+app = FastAPI(title="TAVIR Fábrica")
+api_router = APIRouter(prefix="/api")
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+
+# ----------------------------- Helpers -----------------------------
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def sha256_of(payload: Any) -> str:
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def strip_id(doc: dict) -> dict:
+    doc.pop("_id", None)
+    return doc
+
+
+def progress_of(steps: List[dict]) -> int:
+    if not steps:
+        return 0
+    done = sum(1 for s in steps if s["status"] == "done")
+    return round(done / len(steps) * 100)
+
+
+def current_step_index(steps: List[dict]) -> int:
+    for i, s in enumerate(steps):
+        if s["status"] != "done":
+            return i
+    return len(steps)
+
+
+def done_count(steps: List[dict]) -> int:
+    return sum(1 for s in steps if s["status"] == "done")
+
+
+# ----------------------------- Models -----------------------------
+class Briefing(BaseModel):
+    esteira: str
+    nome: str
+    cliente: str
+    d1_ideia: str = ""
+    d2_publico: str = ""
+    d3_stack: str = ""
+    d4_banco: str = ""
+    d5_materiais: str = ""
+    d6_integracoes: str = ""
+    d7_regras: str = ""
+
+
+class ResolvePayload(BaseModel):
+    supabase_url: Optional[str] = None
+    note: Optional[str] = None
+
+
+# ----------------------------- Seed data -----------------------------
+ESTEIRAS = [
+    {"id": "lp-c", "code": "LP-C", "title": "TAVIR Fábrica · LPs · Criação", "type": "CRIACAO",
+     "projects": 1, "steps": 16, "mesas": 10,
+     "description": "Esteira completa para criar uma Landing Page nova a partir de uma demanda aprovada: descoberta, requisitos, prova visual, comercial, extração, estratégia, construção, QA, SEO, segurança e documentação.",
+     "badge": None},
+    {"id": "lp-m", "code": "LP-M", "title": "TAVIR Fábrica · LPs · Manutenção", "type": "MANUTENCAO",
+     "projects": 1, "steps": 11, "mesas": 8,
+     "description": "Esteira para diagnosticar, alterar e evoluir uma Landing Page existente com controle de impacto, regressão, SEO, segurança e documentação.",
+     "badge": None},
+    {"id": "of-c", "code": "OF-C", "title": "TAVIR Fábrica · Ofertas · Criação", "type": "CRIACAO",
+     "projects": 1, "steps": 8, "mesas": 6,
+     "description": "Esteira interna para criar uma oferta nova a partir de evidência de público e problema, viável e documentada.",
+     "badge": None},
+    {"id": "of-m", "code": "OF-M", "title": "TAVIR Fábrica · Ofertas · Manutenção", "type": "MANUTENCAO",
+     "projects": 0, "steps": 6, "mesas": 5,
+     "description": "Esteira para revisar uma oferta existente com base em evidências, capacidade e concorrência.",
+     "badge": None},
+    {"id": "sy-c", "code": "SY-C", "title": "TAVIR Fábrica · Sistemas · Criação", "type": "CRIACAO",
+     "projects": 1, "steps": 14, "mesas": 8,
+     "description": "Esteira geral para criar sistemas, SaaS, CRMs, APIs, automações e ferramentas internas com requisitos verificáveis, arquitetura, scaffold físico, auto-correção via linter e QA real.",
+     "badge": "14 etapas canónicas · Compiler & Completion Guard"},
+    {"id": "sy-m", "code": "SY-M", "title": "TAVIR Fábrica · Sistemas · Manutenção", "type": "MANUTENCAO",
+     "projects": 1, "steps": 6, "mesas": 5,
+     "description": "Esteira para corrigir, atualizar, migrar ou evoluir um sistema existente com diagnóstico, impacto, rollback e QA.",
+     "badge": None},
+]
+
+
+def lp_c_steps():
+    return [
+        {"idx": 1, "title": "Gate 0 · Demanda e briefing", "agent": "Dora Descoberta", "skills": ["brand-context"], "status": "done", "hash": sha256_of("gate0-meridian"), "isGate": True, "blockReason": None},
+        {"idx": 2, "title": "Requisitos verificáveis", "agent": "Marina + Yuri · Prova Visual", "skills": [], "status": "done", "isGate": False, "blockReason": None},
+        {"idx": 3, "title": "Aprovação dos requisitos", "agent": "Comercial TAVIR", "skills": [], "status": "done", "isGate": True, "blockReason": None},
+        {"idx": 4, "title": "Prova visual · tokens e esqueleto", "agent": "Enzo Extrator", "skills": [], "status": "done", "isGate": False, "blockReason": None},
+        {"idx": 5, "title": "Aprovação da prova visual", "agent": "Bianca Estrategista", "skills": [], "status": "done", "isGate": True, "blockReason": None},
+        {"idx": 6, "title": "Orçamento, deploy e contrato", "agent": "Diego Desenvolvedor", "skills": [], "status": "done", "isGate": False, "blockReason": None},
+        {"idx": 7, "title": "Gate de contratação", "agent": "QA E2E", "skills": [], "status": "done", "isGate": True, "blockReason": None},
+        {"idx": 8, "title": "Fase 1 · Extração técnica", "agent": "Nina SEO", "skills": [], "status": "done", "isGate": False, "blockReason": None},
+        {"idx": 9, "title": "Fase 2 · Estratégia e Plano", "agent": "Bianca Estrategista", "skills": [], "status": "blocked", "isGate": False, "blockReason": "gate"},
+        {"idx": 10, "title": "Construção Modular de Código", "agent": "Diego Desenvolvedor", "skills": ["frontend-excelencia-tavir"], "status": "blocked", "isGate": False, "blockReason": "build"},
+        {"idx": 11, "title": "Loop Linter & Análise Estática", "agent": "Compiler TAVIR", "skills": ["tsc --noEmit", "ruff"], "status": "blocked", "isGate": False, "blockReason": None},
+        {"idx": 12, "title": "QA E2E Playwright", "agent": "Talita QA", "skills": ["playwright"], "status": "blocked", "isGate": False, "blockReason": None},
+        {"idx": 13, "title": "Auditoria SEO", "agent": "Nina SEO", "skills": [], "status": "blocked", "isGate": False, "blockReason": None},
+        {"idx": 14, "title": "Segurança & LGPD", "agent": "Sérgio Seg/LGPD", "skills": ["web-security"], "status": "blocked", "isGate": False, "blockReason": None},
+        {"idx": 15, "title": "Documentação & Runbook", "agent": "Dante Doc", "skills": ["documentacao-sistema"], "status": "blocked", "isGate": False, "blockReason": None},
+        {"idx": 16, "title": "Gate Final CEO · Completion Guard", "agent": "Carlos Henrique · CEO", "skills": [], "status": "blocked", "isGate": True, "blockReason": "gate-final"},
+    ]
+
+
+def sy_c_steps():
+    return [
+        {"idx": 1, "title": "Gate 0 · Demanda e briefing", "agent": "Dora Descoberta", "skills": ["brand-context"], "status": "done", "hash": sha256_of("gate0-atlas"), "isGate": True, "blockReason": None},
+        {"idx": 2, "title": "Requisitos verificáveis", "agent": "Ari Arquiteto", "skills": [], "status": "done", "isGate": False, "blockReason": None},
+        {"idx": 3, "title": "Arquitetura & modelagem", "agent": "Ari Arquiteto", "skills": ["archify", "sql-queries"], "status": "done", "isGate": False, "blockReason": None},
+        {"idx": 4, "title": "Planejamento ágil", "agent": "Paula PM", "skills": ["agile-planning"], "status": "active", "isGate": False, "blockReason": None},
+        {"idx": 5, "title": "Scaffold Físico Oficial", "agent": "Diego Dev Front & Back", "skills": ["flutter create"], "status": "blocked", "isGate": False, "blockReason": "gate"},
+        {"idx": 6, "title": "Construção Front", "agent": "Diego Dev Front & Back", "skills": ["frontend-excelencia-tavir"], "status": "blocked", "isGate": False, "blockReason": None},
+        {"idx": 7, "title": "Construção Back", "agent": "Diego Dev Front & Back", "skills": ["test-driven-development"], "status": "blocked", "isGate": False, "blockReason": None},
+        {"idx": 8, "title": "Loop Linter & Compiler", "agent": "Compiler TAVIR", "skills": ["dart analyze", "tsc --noEmit"], "status": "blocked", "isGate": False, "blockReason": None},
+        {"idx": 9, "title": "QA E2E Playwright", "agent": "Talita QA", "skills": ["playwright"], "status": "blocked", "isGate": False, "blockReason": None},
+        {"idx": 10, "title": "QA Mobile · Emulador tavir_qa", "agent": "Talita QA", "skills": ["mobile-mcp"], "status": "blocked", "isGate": False, "blockReason": None},
+        {"idx": 11, "title": "Segurança & LGPD", "agent": "Sérgio Seg/LGPD", "skills": ["web-security"], "status": "blocked", "isGate": False, "blockReason": None},
+        {"idx": 12, "title": "Completion Guard · 8 regras físicas", "agent": "Compiler TAVIR", "skills": [], "status": "blocked", "isGate": False, "blockReason": None},
+        {"idx": 13, "title": "Documentação & Runbook", "agent": "Dante Doc", "skills": ["documentacao-sistema"], "status": "blocked", "isGate": False, "blockReason": None},
+        {"idx": 14, "title": "Gate Final CEO · Completion Guard", "agent": "Carlos Henrique · CEO", "skills": [], "status": "blocked", "isGate": True, "blockReason": "gate-final"},
+    ]
+
+
+def of_c_steps():
+    titles = [
+        ("Gate 0 · Demanda e briefing", "Dora Descoberta", True),
+        ("Evidência de público e problema", "Bianca Estrategista", False),
+        ("Validação de viabilidade", "Paula PM", False),
+        ("Desenho da oferta", "Bianca Estrategista", False),
+        ("Precificação e margem", "Comercial TAVIR", True),
+        ("Prova e materiais", "Enzo Extrator", False),
+        ("Documentação da oferta", "Dante Doc", False),
+        ("Gate Final CEO", "Carlos Henrique · CEO", True),
+    ]
+    steps = []
+    for i, (t, a, g) in enumerate(titles, 1):
+        steps.append({"idx": i, "title": t, "agent": a, "skills": [], "status": "done" if i <= 2 else "blocked", "isGate": g, "blockReason": None, **({"hash": sha256_of("gate0-oferta")} if i == 1 else {})})
+    return steps
+
+
+def lp_m_steps():
+    titles = [
+        ("Gate 0 · Demanda de manutenção", "Dora Descoberta", True),
+        ("Diagnóstico da LP atual", "Enzo Extrator", False),
+        ("Análise de impacto", "Ari Arquiteto", False),
+        ("Aprovação do plano", "Comercial TAVIR", True),
+        ("Alterações de código", "Diego Desenvolvedor", False),
+        ("Regressão & QA", "Talita QA", False),
+        ("Auditoria SEO", "Nina SEO", False),
+        ("Segurança & LGPD", "Sérgio Seg/LGPD", False),
+        ("Documentação", "Dante Doc", False),
+        ("Deploy de preview", "Diego Desenvolvedor", False),
+        ("Gate Final CEO", "Carlos Henrique · CEO", True),
+    ]
+    steps = []
+    for i, (t, a, g) in enumerate(titles, 1):
+        status = "done" if i <= 7 else "blocked"
+        br = "gate" if i == 8 else None
+        steps.append({"idx": i, "title": t, "agent": a, "skills": [], "status": status, "isGate": g, "blockReason": br, **({"hash": sha256_of("gate0-advocacia")} if i == 1 else {})})
+    return steps
+
+
+def sy_m_steps():
+    titles = [
+        ("Gate 0 · Demanda de manutenção", "Dora Descoberta", True),
+        ("Diagnóstico do sistema", "Ari Arquiteto", False),
+        ("Impacto & rollback", "Ari Arquiteto", False),
+        ("Correção & migração", "Diego Desenvolvedor", False),
+        ("QA Físico & Completion Guard", "Talita QA", False),
+        ("Gate Final CEO · Completion Guard 8/8", "Carlos Henrique · CEO", True),
+    ]
+    steps = []
+    for i, (t, a, g) in enumerate(titles, 1):
+        steps.append({"idx": i, "title": t, "agent": a, "skills": [], "status": "done", "isGate": g, "blockReason": None, **({"hash": sha256_of("gate0-crm")} if i == 1 else {})})
+    return steps
+
+
+def seed_projects():
+    return [
+        {"id": "proj-meridian", "name": "Landing Meridian Capital", "code": "LP-C", "esteira": "lp-c",
+         "client": "Meridian Capital", "status": "andamento", "stack": "React + Vite + TypeScript",
+         "db": "Supabase PostgreSQL", "runner": "GhostCLI · claude-sonnet-5",
+         "steps": lp_c_steps(),
+         "pendencies": [
+             {"id": "pend-gate1", "type": "AUTH", "agent": "Enzo Extrator", "title": "Gate Fase 1 · liberar a Fase 2",
+              "text": "A extração técnica terminou: 5 seções, 42 textos e 18 imagens inventariados. A Fase 2 (estratégia e plano) só começa com a sua autorização.",
+              "diagnosis": None, "resolved": False, "unlocks": "gate"},
+             {"id": "pend-build", "type": "ERROR", "agent": "Diego Desenvolvedor", "title": "Build de preview falhou",
+              "text": "O deploy de preview parou porque a variável SUPABASE_URL não existe na conta vercel · tavir.",
+              "diagnosis": "Causa: configuração: variável não cadastrada ao travar a conta do projeto. · Resolução: cadastrar SUPABASE_URL em Acessos e refazer o preview.",
+              "resolved": False, "unlocks": "build", "error_code": "HTTP 409 FABRICA-COMPLETION-001"},
+         ],
+         "activity": [
+             {"date": "24/09 10:00", "agent": "Dora Descoberta", "message": "Gate 0 aprovado"},
+             {"date": "24/09 16:20", "agent": "Dora Descoberta", "message": "Requisitos aprovados por você"},
+             {"date": "25/09 11:00", "agent": "Marina + Yuri", "message": "Prova visual aprovada"},
+             {"date": "26/09 09:30", "agent": "Comercial TAVIR", "message": "Contrato assinado"},
+             {"date": "28/09 13:35", "agent": "Diego Desenvolvedor", "message": "Erro: SUPABASE_URL ausente no preview"},
+             {"date": "28/09 14:10", "agent": "Enzo Extrator", "message": "Extração técnica concluída · aguardando Gate Fase 1"},
+         ],
+         "inventory": {"secoes": 5, "textos": 42, "imagens": 18},
+         "env": [
+             {"key": "VERCEL_PROJECT", "value": "tavir", "status": "ok"},
+             {"key": "SUPABASE_URL", "value": "", "status": "missing"},
+             {"key": "SUPABASE_ANON_KEY", "value": "eyJhbGciOi•••", "status": "ok"},
+         ],
+         "files": []},
+
+        {"id": "proj-atlas", "name": "Portal de Clientes Atlas", "code": "SY-C", "esteira": "sy-c",
+         "client": "Atlas Holdings", "status": "andamento", "stack": "Flutter 3.38 + Dart / React + Supabase",
+         "db": "Supabase PostgreSQL", "runner": "GhostCLI · opus-5-5",
+         "steps": sy_c_steps(),
+         "pendencies": [
+             {"id": "pend-scaffold", "type": "AUTH", "agent": "Paula PM", "title": "Liberar Scaffold Físico Oficial",
+              "text": "O planejamento ágil terminou. O Scaffold Físico (flutter create / pnpm create vite) só começa com a sua autorização.",
+              "diagnosis": None, "resolved": False, "unlocks": "gate"},
+         ],
+         "activity": [
+             {"date": "02/10 09:00", "agent": "Dora Descoberta", "message": "Gate 0 aprovado · brand-context"},
+             {"date": "02/10 15:40", "agent": "Ari Arquiteto", "message": "Arquitetura aprovada · archify"},
+             {"date": "03/10 10:20", "agent": "Paula PM", "message": "Planejamento ágil concluído · aguardando scaffold"},
+         ],
+         "inventory": None,
+         "env": [
+             {"key": "SUPABASE_URL", "value": "https://atlas.supabase.co", "status": "ok"},
+             {"key": "ANDROID_SDK", "value": "tavir_qa", "status": "ok"},
+         ],
+         "files": [
+             {"path": "lib/main.dart", "type": "file"},
+             {"path": "pubspec.yaml", "type": "file"},
+             {"path": "package.json", "type": "file"},
+             {"path": "test/", "type": "dir"},
+             {"path": "qa/evidencias/", "type": "dir"},
+             {"path": "app-release.apk", "type": "artifact"},
+         ]},
+
+        {"id": "proj-oferta", "name": "Oferta Diagnóstico de Dados", "code": "OF-C", "esteira": "of-c",
+         "client": "TAVIR · Datavir", "status": "pausado", "stack": "Interno",
+         "db": "SQLite WAL", "runner": "GhostCLI · claude-sonnet-5",
+         "steps": of_c_steps(), "pendencies": [],
+         "activity": [
+             {"date": "20/09 11:00", "agent": "Dora Descoberta", "message": "Gate 0 aprovado"},
+             {"date": "21/09 09:00", "agent": "Bianca Estrategista", "message": "Evidência de público coletada · pausado"},
+         ],
+         "inventory": None, "env": [], "files": []},
+
+        {"id": "proj-advocacia", "name": "LP Nicho Advocacia", "code": "LP-M", "esteira": "lp-m",
+         "client": "Nicho Advocacia", "status": "andamento", "stack": "React + Vite",
+         "db": "Supabase PostgreSQL", "runner": "GhostCLI · claude-sonnet-5",
+         "steps": lp_m_steps(),
+         "pendencies": [
+             {"id": "pend-sec", "type": "AUTH", "agent": "Sérgio Seg/LGPD", "title": "Aprovar plano de Segurança & LGPD",
+              "text": "A auditoria SEO terminou. A etapa de Segurança & LGPD aguarda sua autorização para prosseguir.",
+              "diagnosis": None, "resolved": False, "unlocks": "gate"},
+         ],
+         "activity": [
+             {"date": "15/09 10:00", "agent": "Dora Descoberta", "message": "Gate 0 aprovado"},
+             {"date": "18/09 14:00", "agent": "Nina SEO", "message": "Auditoria SEO concluída · aguardando Segurança"},
+         ],
+         "inventory": None, "env": [], "files": []},
+
+        {"id": "proj-crm", "name": "CRM interno TAVIR", "code": "SY-M", "esteira": "sy-m",
+         "client": "TAVIR", "status": "concluido", "stack": "React + FastAPI",
+         "db": "SQLite WAL", "runner": "GhostCLI · opus-5-5",
+         "steps": sy_m_steps(), "pendencies": [],
+         "activity": [
+             {"date": "10/09 10:00", "agent": "Dora Descoberta", "message": "Gate 0 aprovado"},
+             {"date": "12/09 16:00", "agent": "Talita QA", "message": "Completion Guard 8/8 PASS"},
+             {"date": "12/09 17:30", "agent": "Carlos Henrique · CEO", "message": "Gate Final aprovado · entregue"},
+         ],
+         "inventory": None,
+         "env": [{"key": "DATABASE_URL", "value": "sqlite:///office.db", "status": "ok"}],
+         "files": [
+             {"path": "backend/server.py", "type": "file"},
+             {"path": "frontend/src/App.js", "type": "file"},
+             {"path": "qa/evidencias/", "type": "dir"},
+         ],
+         "completionGuard": "8/8"},
+    ]
+
+
+ESTEIRA_STEP_BUILDERS = {
+    "lp-c": lp_c_steps, "sy-c": sy_c_steps, "of-c": of_c_steps,
+    "of-m": of_c_steps, "lp-m": lp_m_steps, "sy-m": sy_m_steps,
+}
+
+
+def completion_guard(project: dict) -> dict:
+    done = sum(1 for s in project["steps"] if s["status"] == "done")
+    total = len(project["steps"])
+    full = done == total
+    rules = [
+        {"id": 1, "label": "Volume de conteúdo > 2.500 chars", "pass": done >= 2},
+        {"id": 2, "label": "Manifesto válido (pubspec.yaml / package.json)", "pass": done >= 3},
+        {"id": 3, "label": "Entrypoint executável (lib/main.dart / index)", "pass": done >= 5},
+        {"id": 4, "label": "Segregação arquitetural respeitada", "pass": done >= 6},
+        {"id": 5, "label": "Zero imports quebrados", "pass": done >= 8},
+        {"id": 6, "label": "Testes físicos em qa/evidencias/", "pass": done >= 10},
+        {"id": 7, "label": "Zero // TODO ou stubs", "pass": done >= 12},
+        {"id": 8, "label": "QA + Security + Docs PASS", "pass": full},
+    ]
+    passed = sum(1 for r in rules if r["pass"])
+    linters = [
+        {"cmd": "dart analyze", "status": "pass" if done >= 8 else "idle"},
+        {"cmd": "tsc --noEmit", "status": "pass" if done >= 8 else "idle"},
+        {"cmd": "ruff", "status": "pass" if done >= 8 else "idle"},
+    ]
+    return {
+        "rules": rules, "passed": passed, "total": 8, "allPass": passed == 8,
+        "linters": linters,
+        "playwright": "pass" if done >= 12 else "idle",
+        "emulator": "tavir_qa · pass" if (project["code"].startswith("SY") and done >= 10) else "idle",
+    }
+
+
+@app.on_event("startup")
+async def seed():
+    if await db.esteiras.count_documents({}) == 0:
+        await db.esteiras.insert_many([dict(e) for e in ESTEIRAS])
+        logger.info("Seeded esteiras")
+    if await db.projects.count_documents({}) == 0:
+        await db.projects.insert_many(seed_projects())
+        logger.info("Seeded projects")
+
+
+@api_router.get("/")
+async def root():
+    return {"message": "TAVIR Fábrica API", "status": "ok"}
+
+
+@api_router.get("/esteiras")
+async def get_esteiras():
+    items = await db.esteiras.find({}, {"_id": 0}).to_list(100)
+    order = {e["id"]: i for i, e in enumerate(ESTEIRAS)}
+    items.sort(key=lambda x: order.get(x["id"], 99))
+    return items
+
+
+@api_router.get("/projects")
+async def get_projects():
+    items = await db.projects.find({}, {"_id": 0}).to_list(200)
+    result = []
+    for p in items:
+        result.append({
+            "id": p["id"], "name": p["name"], "code": p["code"], "esteira": p["esteira"],
+            "client": p["client"], "status": p["status"], "stack": p.get("stack"),
+            "progress": progress_of(p["steps"]),
+            "currentStep": done_count(p["steps"]),
+            "totalSteps": len(p["steps"]),
+            "pendencies": len([x for x in p["pendencies"] if not x["resolved"]]),
+            "completionGuard": p.get("completionGuard"),
+        })
+    order = {"proj-meridian": 0, "proj-atlas": 1, "proj-oferta": 2, "proj-advocacia": 3, "proj-crm": 4}
+    result.sort(key=lambda x: order.get(x["id"], 99))
+    return result
+
+
+def enrich(p: dict) -> dict:
+    p = strip_id(p)
+    p["progress"] = progress_of(p["steps"])
+    p["currentStep"] = done_count(p["steps"])
+    p["totalSteps"] = len(p["steps"])
+    p["openPendencies"] = len([x for x in p["pendencies"] if not x["resolved"]])
+    p["guard"] = completion_guard(p)
+    return p
+
+
+@api_router.get("/projects/{pid}")
+async def get_project(pid: str):
+    p = await db.projects.find_one({"id": pid})
+    if not p:
+        raise HTTPException(404, "Projeto não encontrado")
+    return enrich(p)
+
+
+@api_router.post("/projects/{pid}/complete-step")
+async def complete_step(pid: str):
+    p = await db.projects.find_one({"id": pid})
+    if not p:
+        raise HTTPException(404, "Projeto não encontrado")
+    steps = p["steps"]
+    ci = current_step_index(steps)
+    if ci >= len(steps):
+        await db.projects.update_one({"id": pid}, {"$set": {"status": "concluido", "completionGuard": "8/8"}})
+        p["status"] = "concluido"
+        p["completionGuard"] = "8/8"
+        return {"blocked": False, "done": True, "project": enrich(p)}
+    step = steps[ci]
+    if step["status"] == "blocked" and step["blockReason"]:
+        return {"blocked": True, "reason": step["blockReason"], "step": step, "project": enrich(p)}
+    steps[ci]["status"] = "done"
+    nxt = ci + 1
+    if nxt < len(steps) and steps[nxt]["status"] == "active":
+        pass
+    elif nxt < len(steps) and steps[nxt]["status"] != "blocked":
+        steps[nxt]["status"] = "active"
+    new_status = "concluido" if current_step_index(steps) >= len(steps) else "andamento"
+    act = {"date": datetime.now(timezone.utc).strftime("%d/%m %H:%M"), "agent": step["agent"], "message": f"{step['title']} concluído"}
+    p["activity"].insert(0, act)
+    upd = {"steps": steps, "status": new_status, "activity": p["activity"]}
+    if new_status == "concluido":
+        upd["completionGuard"] = "8/8"
+    await db.projects.update_one({"id": pid}, {"$set": upd})
+    p.update(upd)
+    return {"blocked": False, "done": new_status == "concluido", "project": enrich(p)}
+
+
+@api_router.post("/projects/{pid}/pendencies/{pend_id}/resolve")
+async def resolve_pendency(pid: str, pend_id: str, payload: ResolvePayload):
+    p = await db.projects.find_one({"id": pid})
+    if not p:
+        raise HTTPException(404, "Projeto não encontrado")
+    pend = next((x for x in p["pendencies"] if x["id"] == pend_id), None)
+    if not pend:
+        raise HTTPException(404, "Pendência não encontrada")
+    if pend["resolved"]:
+        return enrich(p)
+
+    signature = None
+    if pend["unlocks"] == "gate":
+        ci = current_step_index(p["steps"])
+        for s in p["steps"]:
+            if s.get("blockReason") == "gate":
+                s["blockReason"] = None
+                if s["status"] == "blocked" and s["idx"] - 1 == ci:
+                    s["status"] = "active"
+        signature = sha256_of({"gate": pend["title"], "ts": now_iso(), "by": "Carlos Henrique"})
+        msg = f"{pend['title']} · autorizado por você"
+    elif pend["unlocks"] == "build":
+        url = (payload.supabase_url or "").strip()
+        if not url:
+            raise HTTPException(400, "SUPABASE_URL é obrigatório para refazer o preview")
+        for e in p.get("env", []):
+            if e["key"] == "SUPABASE_URL":
+                e["value"] = url
+                e["status"] = "ok"
+        ci = current_step_index(p["steps"])
+        for s in p["steps"]:
+            if s.get("blockReason") == "build":
+                s["blockReason"] = None
+                if s["idx"] - 1 == ci:
+                    s["status"] = "active"
+        msg = "SUPABASE_URL cadastrado · preview refeito com sucesso"
+    else:
+        msg = f"{pend['title']} resolvido"
+
+    pend["resolved"] = True
+    act = {"date": datetime.now(timezone.utc).strftime("%d/%m %H:%M"), "agent": pend["agent"], "message": msg}
+    p["activity"].insert(0, act)
+    await db.projects.update_one({"id": pid}, {"$set": {"steps": p["steps"], "pendencies": p["pendencies"], "activity": p["activity"], "env": p.get("env", [])}})
+    out = enrich(p)
+    if signature:
+        out["signature"] = signature
+    return out
+
+
+@api_router.post("/projects")
+async def create_project(brief: Briefing):
+    vague = ["a definir", "pendente", "tbd", "n/a", "todo"]
+    fields = {
+        "Ideia & Problema": brief.d1_ideia, "Público-Alvo": brief.d2_publico,
+        "Stack Tecnológica": brief.d3_stack, "Banco de Dados": brief.d4_banco,
+        "Materiais & Referências": brief.d5_materiais, "Integrações & MCPs": brief.d6_integracoes,
+        "Regras de Negócio": brief.d7_regras,
+    }
+    for name, val in fields.items():
+        v = (val or "").strip()
+        if len(v) < 8:
+            raise HTTPException(422, f"Dimensão '{name}' precisa de conteúdo real (anti-teatro).")
+        if any(t in v.lower() for t in vague):
+            raise HTTPException(422, f"Dimensão '{name}' contém termo vago proibido (ex.: 'A definir', 'Pendente').")
+
+    esteira = await db.esteiras.find_one({"id": brief.esteira}, {"_id": 0})
+    if not esteira:
+        raise HTTPException(404, "Esteira inválida")
+
+    builder = ESTEIRA_STEP_BUILDERS.get(brief.esteira, of_c_steps)
+    steps = builder()
+    for s in steps:
+        s["status"] = "blocked"
+        s["blockReason"] = None
+        s.pop("hash", None)
+    steps[0]["status"] = "done"
+    steps[0]["hash"] = sha256_of({"brief": fields, "nome": brief.nome, "ts": now_iso()})
+    if len(steps) > 1:
+        steps[1]["status"] = "active"
+
+    stack_l = brief.d3_stack.lower()
+    scaffold = "flutter create" if "flutter" in stack_l else ("pnpm create vite" if ("react" in stack_l or "vite" in stack_l) else "python -m venv")
+
+    pid = "proj-" + uuid.uuid4().hex[:8]
+    doc = {
+        "id": pid, "name": brief.nome, "code": esteira["code"], "esteira": brief.esteira,
+        "client": brief.cliente, "status": "andamento", "stack": brief.d3_stack, "db": brief.d4_banco,
+        "runner": "GhostCLI · claude-sonnet-5", "steps": steps, "pendencies": [],
+        "activity": [{"date": datetime.now(timezone.utc).strftime("%d/%m %H:%M"), "agent": "Dora Descoberta",
+                      "message": f"Gate 0 aprovado · {scaffold} · scaffold físico gerado"}],
+        "inventory": None, "env": [], "files": [], "briefing": fields,
+    }
+    await db.projects.insert_one(dict(doc))
+    await db.esteiras.update_one({"id": brief.esteira}, {"$inc": {"projects": 1}})
+    out = enrich(doc)
+    out["hash"] = steps[0]["hash"]
+    out["scaffold"] = scaffold
+    return out
+
+
+@api_router.post("/admin/reseed")
+async def reseed():
+    await db.esteiras.delete_many({})
+    await db.projects.delete_many({})
+    await db.esteiras.insert_many([dict(e) for e in ESTEIRAS])
+    await db.projects.insert_many(seed_projects())
+    return {"ok": True}
+
+
+app.include_router(api_router)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    client.close()
