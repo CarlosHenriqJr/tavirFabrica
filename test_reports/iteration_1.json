@@ -1,0 +1,38 @@
+{
+  "summary": "Backend: 11/11 pytest passed (esteiras, projects list/detail, resolve AUTH/BUILD pendencies, build 400 validation, blocked complete-step, full-flow advance, project creation, anti-theatre validations). Frontend: dashboard renders 6 esteiras + 5 projects, filters CRIACAO=3/MANUTENCAO=3 work, Ctrl+K palette opens, project card navigates to /projeto/:id, 7 tabs render, 2 pendencies on meridian, AUTH resolve modal reduces to 1 pendency, BUILD resolve modal (SUPABASE_URL field) resolves to 0 pendencies, Acessos tab shows SUPABASE_URL = OK after resolve, proj-crm Completion Guard tab renders 8 rules, Gate 0 modal opens via Iniciar job button.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "/api/projects/proj-crm (guard)", "issue": "proj-crm (SY-M, 6 steps all done, status=concluido) returns guard.passed=5/8 even though the project-level completionGuard string is '8/8'. Rules 5,6,7 require done>=8/10/12 which is unreachable for a 6-step esteira. Spec explicitly requires 8/8 PASS on the Guard tab for proj-crm. The completion_guard() thresholds must scale to steps length (or special-case completed projects to all PASS).", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Completion Guard tab for proj-crm", "issue": "UI shows 5/8 instead of 8/8 PASS because backend guard rules are wrong (see backend critical issue). The 'Concluido' badge and 100% progress are correct, but the physical rule panel is inconsistent.", "affected_selectors": ["guard-rule-5","guard-rule-6","guard-rule-7"]}
+    ],
+    "design_issues": [
+      {"screen": "Multiple Dialogs (CommandPalette, Gate0Modal, Pendency resolve modal)", "issues": ["Radix DialogContent missing DialogTitle (accessibility error in console)", "Missing Description/aria-describedby on DialogContent"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Fix completion_guard() in /app/backend/server.py so that rules 5-7 scale with len(steps) OR when project status == 'concluido' force all 8 rules to pass (so SY-M concluido projects reach guard 8/8 PASS per spec).",
+    "Add DialogTitle (with VisuallyHidden if needed) and aria-describedby/Description to CommandPalette, Gate0Modal and Pendency resolve Dialogs to resolve Radix accessibility warnings."
+  ],
+  "critical_code_review_comments": [
+    "completion_guard thresholds are hard-coded for a 16-step canonical pipeline; they do not generalise to shorter esteiras (SY-M=6, LP-M=11, OF-C=8). Make thresholds proportional (e.g. rule.pass = done/total >= ratio) or compute pass states from step metadata.",
+    "@app.on_event('startup')/('shutdown') are deprecated in modern FastAPI; prefer lifespan context managers.",
+    "CORS allow_origins defaulting to '*' with allow_credentials=True is a browser-rejected combo; harmless now but should be an explicit list in prod.",
+    "The project list builds a hard-coded order dict for seed IDs only; new projects created via POST /api/projects always sort to the end (ok) but there is no created_at timestamp for stable ordering.",
+    "complete-step: when ci>=len(steps) it sets status=concluido and completionGuard '8/8' but does not insert an activity entry (minor UX)."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (11/11 pytest; 1 spec-level logic bug on guard rules)", "frontend": "~95% (all critical flows work; guard-tab consistency is the only functional miss)"},
+  "test_credentials": "N/A - no auth",
+  "seed_data_creation": "Used POST /api/admin/reseed before/after mutating tests to keep deterministic counts.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest at /app/backend/tests/backend_test.py is green. Only outstanding functional bug is completion_guard() rules not reaching 8/8 for proj-crm; after main agent fixes it, re-run the suite and re-check Guard tab (data-testid guard-rule-1..8) on /projeto/proj-crm. State mutates on resolve/complete-step/create – always POST /api/admin/reseed before testing counts.",
+  "rca of the issue": "RCA (proj-crm 5/8 bug): In server.py completion_guard(), rules 5,6,7 are gated by done>=8, 10, 12. proj-crm (SY-M) only has 6 steps, so even when every step is done these three rules can never pass. Rule 8 passes (done==total). Mitigation: either (a) scale thresholds, e.g. [done>=max(1,int(total*ratio)) for ratio in 0.1,0.2,0.3,0.4,0.5,0.6,0.75]; or (b) when project.status=='concluido' or done==total, mark all rules pass. Reproduction: GET /api/projects/proj-crm -> guard.passed=5."
+}

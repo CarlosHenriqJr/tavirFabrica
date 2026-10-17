@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Zap, Check, AlertTriangle, Loader2, Terminal } from "lucide-react";
@@ -98,10 +98,11 @@ export default function Gate0Modal({ open, setOpen }) {
             Gate 0 · Intake & Briefing Estruturado
           </DialogTitle>
           <p className="text-sm text-[#8A94A6] mt-1">7 dimensões obrigatórias · assinatura SHA-256 · validação anti-teatro</p>
+          <DialogDescription className="sr-only">Formulário estruturado do Gate 0 com 7 dimensões obrigatórias.</DialogDescription>
         </DialogHeader>
 
         {phase === "form" ? (
-          <div className="overflow-y-auto px-6 py-5 space-y-5">
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-5">
             {/* Esteira selector */}
             <div>
               <label className="text-[11px] font-semibold tracking-wider text-[#5C6578] uppercase">Escolha da Esteira</label>

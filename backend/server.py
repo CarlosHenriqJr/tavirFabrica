@@ -314,28 +314,35 @@ ESTEIRA_STEP_BUILDERS = {
 def completion_guard(project: dict) -> dict:
     done = sum(1 for s in project["steps"] if s["status"] == "done")
     total = len(project["steps"])
-    full = done == total
-    rules = [
-        {"id": 1, "label": "Volume de conteúdo > 2.500 chars", "pass": done >= 2},
-        {"id": 2, "label": "Manifesto válido (pubspec.yaml / package.json)", "pass": done >= 3},
-        {"id": 3, "label": "Entrypoint executável (lib/main.dart / index)", "pass": done >= 5},
-        {"id": 4, "label": "Segregação arquitetural respeitada", "pass": done >= 6},
-        {"id": 5, "label": "Zero imports quebrados", "pass": done >= 8},
-        {"id": 6, "label": "Testes físicos em qa/evidencias/", "pass": done >= 10},
-        {"id": 7, "label": "Zero // TODO ou stubs", "pass": done >= 12},
-        {"id": 8, "label": "QA + Security + Docs PASS", "pass": full},
+    full = (done == total) or project.get("status") == "concluido"
+    ratio = (done / total) if total else 0
+    labels = [
+        "Volume de conteúdo > 2.500 chars",
+        "Manifesto válido (pubspec.yaml / package.json)",
+        "Entrypoint executável (lib/main.dart / index)",
+        "Segregação arquitetural respeitada",
+        "Zero imports quebrados",
+        "Testes físicos em qa/evidencias/",
+        "Zero // TODO ou stubs",
+        "QA + Security + Docs PASS",
     ]
+    thresholds = [0.12, 0.25, 0.38, 0.5, 0.62, 0.74, 0.86, 1.0]
+    rules = []
+    for i, (lab, th) in enumerate(zip(labels, thresholds), 1):
+        passed = full if i == 8 else (full or ratio >= th)
+        rules.append({"id": i, "label": lab, "pass": passed})
     passed = sum(1 for r in rules if r["pass"])
+    lint_ok = full or ratio >= 0.5
     linters = [
-        {"cmd": "dart analyze", "status": "pass" if done >= 8 else "idle"},
-        {"cmd": "tsc --noEmit", "status": "pass" if done >= 8 else "idle"},
-        {"cmd": "ruff", "status": "pass" if done >= 8 else "idle"},
+        {"cmd": "dart analyze", "status": "pass" if lint_ok else "idle"},
+        {"cmd": "tsc --noEmit", "status": "pass" if lint_ok else "idle"},
+        {"cmd": "ruff", "status": "pass" if lint_ok else "idle"},
     ]
     return {
         "rules": rules, "passed": passed, "total": 8, "allPass": passed == 8,
         "linters": linters,
-        "playwright": "pass" if done >= 12 else "idle",
-        "emulator": "tavir_qa · pass" if (project["code"].startswith("SY") and done >= 10) else "idle",
+        "playwright": "pass" if (full or ratio >= 0.75) else "idle",
+        "emulator": "tavir_qa · pass" if (project["code"].startswith("SY") and (full or ratio >= 0.65)) else "idle",
     }
 
 

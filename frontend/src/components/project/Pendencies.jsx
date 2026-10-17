@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ShieldCheck, AlertTriangle, Loader2, Hash, Check } from "lucide-react";
@@ -36,6 +36,7 @@ function ResolveGateModal({ open, setOpen, project, pend, onResolved }) {
             {isBuild ? <AlertTriangle size={17} className="text-rose-400" /> : <ShieldCheck size={17} className="text-amber-300" />}
             {isBuild ? "Resolver bloqueio técnico de build" : "Decisão executiva · Gate Humano"}
           </DialogTitle>
+          <DialogDescription className="sr-only">Modal de resolução de pendência da esteira.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
